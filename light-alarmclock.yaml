@@ -13,6 +13,7 @@ blueprint:
       selector:
         entity:
           domain: light
+
     timestamp_sensor:
       name: Alarm timestamp sensor
       description: >
@@ -22,6 +23,7 @@ blueprint:
       selector:
         entity:
           device_class: timestamp
+
     manual_time:
       name: Manual alarm time
       description: >
@@ -30,6 +32,7 @@ blueprint:
       default: "7:00:00"
       selector:
         time: {}
+
     check_entity:
       name: Additional entity to check before sunrise is triggered
       description: >
@@ -38,6 +41,7 @@ blueprint:
       default: none
       selector:
         entity: {}
+
     sunrise_duration:
       name: Sunrise duration
       description: The sunrise will start the configured number of minutes before the timestamp.
@@ -49,6 +53,7 @@ blueprint:
           step: 5.0
           unit_of_measurement: min
           mode: slider
+
     start_brightness:
       name: Minimum brightness
       description: >
@@ -61,6 +66,7 @@ blueprint:
           max: 255.0
           step: 1.0
           mode: slider
+
     end_brightness:
       name: Maximum brightness
       description: The brightness will be transitioned from the minimum to the configured value.
@@ -72,13 +78,18 @@ blueprint:
           step: 1.0
           mode: slider
 
-    # Reworked: Kelvin-based minimum (instead of mireds)
     min_kelvin:
       name: Minimum color temperature (Kelvin)
       description: >
-        The minimum color temperature to use in Kelvin.
-        (0: use the light's lowest supported Kelvin)
-      default: 0
+        Color temperature in Kelvin (K). Lower K = warmer/more orange (e.g. ~2000K),
+        higher K = cooler/more white/blue (e.g. ~6500K).
+
+        This value controls the *warmest* point of the sunrise. Typically you'd start warm
+        (default: 2000K) and ramp towards a cooler white near wake-up.
+
+        Set to 0 to use the light's minimum supported Kelvin automatically (recommended if you
+        don't want to tune it).
+      default: 2000
       selector:
         number:
           min: 0.0
@@ -87,24 +98,101 @@ blueprint:
           mode: slider
           unit_of_measurement: K
 
+    max_kelvin:
+      name: Maximum color temperature (Kelvin)
+      description: >
+        Color temperature in Kelvin (K). Lower K = warmer/more orange, higher K = cooler/more white/blue.
+
+        This value controls the *coolest* point of the sunrise (around your alarm time). What you pick
+        depends on personal preference:
+          - ~3000K: still warm/relaxing
+          - ~4000K: neutral white (common indoor daytime)
+          - ~5000-6500K: daylight/cool white (very bright/alerting)
+
+        Normally this is set to a neutral/daylight white (default: 4000K). Set to 0 to use the light's
+        maximum supported Kelvin automatically.
+      default: 4000
+      selector:
+        number:
+          min: 0.0
+          max: 10000.0
+          step: 100.0
+          mode: slider
+          unit_of_measurement: K
+
+    color_temp_curve:
+      name: Color temperature curve (how fast it gets cooler)
+      description: >
+        Controls how quickly the light transitions from warm (min Kelvin) to cool (max Kelvin)
+        during the sunrise window.
+
+        All curves still start at min Kelvin at the beginning and end at max Kelvin at the alarm time,
+        but they change *when* most of the cooling happens:
+
+          - linear (default): steady change throughout (simple + predictable)
+          - ease_in: changes slowly at first, then cools faster near the end
+          - ease_out: cools quickly at the start, then changes slowly near the end
+          - ease_in_out: slow at start and end, faster in the middle (often feels natural)
+          - step_end: stays warm most of the time, then switches/cools rapidly near the end
+
+        Which one is best depends on you:
+          - If you want to stay cozy/warm and only get “daylight” close to wake-up: use ease_in or step_end
+          - If you want to feel alert early in the ramp: use ease_out
+          - If you want something balanced: use ease_in_out
+      default: linear
+      selector:
+        select:
+          options:
+            - label: "Linear"
+              value: linear
+            - label: "Ease-in (slow → fast)"
+              value: ease_in
+            - label: "Ease-out (fast → slow)"
+              value: ease_out
+            - label: "Ease-in-out (slow → fast → slow)"
+              value: ease_in_out
+            - label: "Step near end (mostly warm, cool at end)"
+              value: step_end
+          mode: dropdown
+
+    step_end_percent:
+      name: Step curve: warm portion (%)
+      description: >
+        Only used when Color temperature curve is "Step near end".
+        The light will stay at the warmest temperature for this percentage of the sunrise duration,
+        then transition to the coolest temperature during the remaining time.
+
+        Example: 80% means "stay warm for 80% of the ramp, then cool during the last 20%".
+      default: 80
+      selector:
+        number:
+          min: 50.0
+          max: 95.0
+          step: 5.0
+          unit_of_measurement: "%"
+          mode: slider
+
     start_time:
       name: Start time (optional)
       description: Optional start time for the time window in which the automation can trigger.
       default: ""
       selector:
         time: {}
+
     end_time:
       name: End time (optional)
       description: Optional end time for the time window in which the automation can trigger.
       default: ""
       selector:
         time: {}
+
     pre_sunrise_actions:
       name: Pre-sunrise actions
       description: Optional actions to run before sunrise starts.
       default: []
       selector:
         action: {}
+
     post_sunrise_actions:
       name: Post-sunrise actions
       description: Optional actions to run after sunrise ends (around the alarm time).
@@ -132,20 +220,27 @@ variables:
   end_t: "{{ strptime(end_time, '%H:%M:%S').time() if end_time else None }}"
   now_t: "{{ now().time() }}"
 
-  # Reworked: detect support and compute kelvin range
   supports_color_temp: "{{ 'color_temp' in (state_attr(light_entity, 'supported_color_modes') or []) }}"
 
-  # Hue (and many modern lights) expose Kelvin attributes; we default safely.
   light_min_kelvin: "{{ state_attr(light_entity, 'min_color_temp_kelvin') | int(2000) }}"
   light_max_kelvin: "{{ state_attr(light_entity, 'max_color_temp_kelvin') | int(6500) }}"
+
   min_kelvin_input: !input "min_kelvin"
+  max_kelvin_input: !input "max_kelvin"
 
-  # For sunrise we usually start warmer (lower K) and end cooler (higher K).
-  start_kelvin: "{{ light_min_kelvin }}"
+  start_kelvin: >
+    {{ (min_kelvin_input | int(0)) if (min_kelvin_input | int(0)) > 0 else light_min_kelvin }}
   end_kelvin: >
-    {{ [ light_max_kelvin, (min_kelvin_input | int(0)) ] | max if (min_kelvin_input | int(0)) > 0 else light_max_kelvin }}
+    {{ (max_kelvin_input | int(0)) if (max_kelvin_input | int(0)) > 0 else light_max_kelvin }}
 
-  # Convenience: compute alarm timestamp expression once
+  kelvin_low: "{{ [start_kelvin | int, end_kelvin | int] | min }}"
+  kelvin_high: "{{ [start_kelvin | int, end_kelvin | int] | max }}"
+  start_kelvin_norm: "{{ kelvin_low | int }}"
+  end_kelvin_norm: "{{ kelvin_high | int }}"
+
+  color_temp_curve: !input "color_temp_curve"
+  step_end_percent: !input "step_end_percent"
+
   alarm_ts: >
     {{ as_timestamp(
         states(sensor) if sensor != 'none'
@@ -184,7 +279,6 @@ action:
       {{ 0 < (alarm_ts - as_timestamp(now())) <= float(seconds)
          and states(check_entity) in ['unknown', 'on', 'home'] }}
 
-  # Sunrise start: explicitly set color_temp_kelvin if supported to override yesterday's xy/rgb color
   - choose:
       - conditions:
           - "{{ supports_color_temp }}"
@@ -192,7 +286,7 @@ action:
           - service: light.turn_on
             data:
               brightness: "{{ start_brightness | int }}"
-              color_temp_kelvin: "{{ start_kelvin | int }}"
+              color_temp_kelvin: "{{ start_kelvin_norm | int }}"
             entity_id: !input "light_entity"
     default:
       - service: light.turn_on
@@ -225,11 +319,47 @@ action:
                                       * ((alarm_ts - as_timestamp(now())) / float(seconds))
                                     )
                                 ) | int(0) }}
+
+                            # Compute curve progress p in [0..1], where:
+                            # p=0 at start of sunrise window (now far from alarm)
+                            # p=1 at alarm time
+                            #
+                            # We first compute remaining fraction r in [0..1], then p = 1-r
+                            # r = (alarm_ts - now) / seconds
+                            # p = 1 - r
                             color_temp_kelvin: >
-                              {{ ( float(end_kelvin)
-                                  + ( float(start_kelvin) - float(end_kelvin) )
-                                    * ((alarm_ts - as_timestamp(now())) / float(seconds))
-                                ) | int(0) }}
+                              {% set r = ((alarm_ts - as_timestamp(now())) / float(seconds)) %}
+                              {% set r = [0, [r, 1] | min] | max %}
+                              {% set p = 1 - r %}
+
+                              {# Choose curve-mapped progress q in [0..1] #}
+                              {% if color_temp_curve == 'linear' %}
+                                {% set q = p %}
+                              {% elif color_temp_curve == 'ease_in' %}
+                                {# slow -> fast #}
+                                {% set q = p ** 2 %}
+                              {% elif color_temp_curve == 'ease_out' %}
+                                {# fast -> slow #}
+                                {% set q = 1 - ((1 - p) ** 2) %}
+                              {% elif color_temp_curve == 'ease_in_out' %}
+                                {# smoothstep: 3p^2 - 2p^3 #}
+                                {% set q = (3 * (p ** 2)) - (2 * (p ** 3)) %}
+                              {% elif color_temp_curve == 'step_end' %}
+                                {% set warm_portion = (step_end_percent | float(80)) / 100 %}
+                                {% if p <= warm_portion %}
+                                  {% set q = 0 %}
+                                {% else %}
+                                  {% set denom = (1 - warm_portion) %}
+                                  {% set q = (p - warm_portion) / (denom if denom > 0 else 1) %}
+                                {% endif %}
+                              {% else %}
+                                {% set q = p %}
+                              {% endif %}
+
+                              {# Map q onto Kelvin range (warm->cool) #}
+                              {{ ( (start_kelvin_norm | float)
+                                   + ((end_kelvin_norm | float) - (start_kelvin_norm | float)) * q
+                                 ) | int(0) }}
                           entity_id: !input "light_entity"
                   default:
                     - service: light.turn_on
