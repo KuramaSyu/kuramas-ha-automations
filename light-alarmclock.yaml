@@ -156,7 +156,7 @@ blueprint:
           mode: dropdown
 
     step_end_percent:
-      name: Step curve: warm portion (%)
+      name: "Step curve: warm portion (%)"
       description: >
         Only used when Color temperature curve is "Step near end".
         The light will stay at the warmest temperature for this percentage of the sunrise duration,
