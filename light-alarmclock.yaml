@@ -50,6 +50,29 @@ blueprint:
       selector:
         entity: {}
 
+    last_run_entity:
+      name: Last run timestamp helper
+      description: >
+        Optional datetime helper (input_datetime) to store the last successful run time.
+        This is used to prevent the automation from running again within the cooldown period.
+      default: none
+      selector:
+        entity:
+          domain: input_datetime
+
+    cooldown_duration:
+      name: Cooldown duration (hours)
+      description: >
+        The minimum time in hours that must pass before the automation can run again.
+      default: 2
+      selector:
+        number:
+          min: 0.5
+          max: 24.0
+          step: 0.5
+          unit_of_measurement: h
+          mode: slider
+
     sunrise_duration:
       name: Sunrise duration
       description: The sunrise will start the configured number of minutes before the timestamp.
@@ -222,6 +245,8 @@ variables:
   tick_time: "{{ float(seconds) / float(range_brightness) }}"
   check_entity: !input "check_entity"
   kill_switch_entity: !input "kill_switch_entity"
+  last_run_entity: !input "last_run_entity"
+  cooldown_duration: !input "cooldown_duration"
 
   start_time: !input "start_time"
   end_time: !input "end_time"
@@ -272,6 +297,10 @@ condition:
   - condition: template
     value_template: >
       {{ kill_switch_entity == 'none' or states(kill_switch_entity) != 'on' }}
+  - condition: template
+    value_template: >
+      {{ last_run_entity == 'none' or
+         as_timestamp(now()) - as_timestamp(states(last_run_entity), 0) > cooldown_duration * 3600 }}
 
 action:
   - wait_template: "{{ sensor == 'none' or as_timestamp(states(sensor), None) != None }}"
@@ -386,6 +415,16 @@ action:
 
   - choose: []
     default: !input "post_sunrise_actions"
+
+  - choose:
+      - conditions:
+          - "{{ last_run_entity != 'none' }}"
+        sequence:
+          - service: input_datetime.set_datetime
+            target:
+              entity_id: !input last_run_entity
+            data:
+              datetime: "{{ now().isoformat() }}"
 
 mode: single
 max_exceeded: silent
