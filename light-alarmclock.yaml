@@ -42,6 +42,14 @@ blueprint:
       selector:
         entity: {}
 
+    kill_switch_entity:
+      name: Automation kill switch
+      description: >
+        Optional helper that can be used to disable the automation. If the state of this entity is 'on', the automation will not run.
+      default: none
+      selector:
+        entity: {}
+
     sunrise_duration:
       name: Sunrise duration
       description: The sunrise will start the configured number of minutes before the timestamp.
@@ -213,6 +221,7 @@ variables:
   seconds: "{{ float(sunrise_duration) * 60 }}"
   tick_time: "{{ float(seconds) / float(range_brightness) }}"
   check_entity: !input "check_entity"
+  kill_switch_entity: !input "kill_switch_entity"
 
   start_time: !input "start_time"
   end_time: !input "end_time"
@@ -260,6 +269,9 @@ condition:
          (start_t is none and end_t is not none and now_t <= end_t) or
          (start_t is not none and end_t is not none and
            ((start_t <= now_t <= end_t) if start_t < end_t else (now_t >= start_t or now_t <= end_t))) }}
+  - condition: template
+    value_template: >
+      {{ kill_switch_entity == 'none' or states(kill_switch_entity) != 'on' }}
 
 action:
   - wait_template: "{{ sensor == 'none' or as_timestamp(states(sensor), None) != None }}"
