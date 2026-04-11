@@ -1,0 +1,71 @@
+fields:
+  angle:
+    name: Angle to represent new color temperature
+    description: Winkel zur Änderung der Farbtemperatur
+    required: true
+    example: "-120.7"
+    default: -120.7
+    selector:
+      number:
+        min: -360
+        max: 360
+        step: 0.1
+        mode: box
+  light:
+    name: Light entity to control
+    required: true
+    selector:
+      entity:
+        domain: light
+  transition:
+    name: Transition
+    required: false
+    selector:
+      number:
+        min: 0
+        max: 1800
+        step: 0.5
+variables:
+  sensi_var: 40
+  sens_d: "{{ sensi_var / 100 }}"
+  min_k: "{{ state_attr(light, 'min_color_temp_kelvin') | int(2000) }}"
+  max_k: "{{ state_attr(light, 'max_color_temp_kelvin') | int(6500) }}"
+  ct_p: >-
+    {% set step_size = angle * sens_d * 10 %}
+
+    {# aktuelle Kelvin holen #} {% set current = state_attr(light,
+    'color_temp_kelvin') | float(3000) %}
+
+    {% set new = current + step_size %}
+
+    {% if new < min_k %}
+      {{ min_k }}
+    {% elif new > max_k %}
+      {{ max_k }}
+    {% else %}
+      {{ new }}
+    {% endif %}
+  transition_var: |-
+    {% if is_number(transition | default('none')) %}
+      {{ transition }}
+    {% else %}
+      none
+    {% endif %}
+sequence:
+  - if:
+      - condition: template
+        value_template: "{{ is_number(transition_var) }}"
+    then:
+      - data:
+          entity_id: "{{ light }}"
+          color_temp_kelvin: "{{ ct_p }}"
+          transition: "{{ transition_var }}"
+        action: light.turn_on
+    else:
+      - data:
+          entity_id: "{{ light }}"
+          color_temp_kelvin: "{{ ct_p }}"
+        action: light.turn_on
+mode: queued
+max: 10
+alias: Kelvin Dimmer Control
