@@ -159,31 +159,29 @@ condition:
   # 📍 4. Presence / Away / Distanz Logik
   - condition: template
     value_template: >
-      {% set tracker_state = states(!input tracker) %}
+      {% set tracker = states(tracker_entity) %}
 
-      {% set presence_zones = !input presence_zones %}
-      {% set away_zones = !input away_zones %}
+      {% set presence_zones = presence_zone_entities %}
+      {% set away_zones = away_zone_entities %}
 
       {% set presence_names = presence_zones
-          | map(attribute='entity_id')
           | map('replace','zone.','')
           | list %}
 
       {% set away_names = away_zones
-          | map(attribute='entity_id')
           | map('replace','zone.','')
           | list %}
 
-      {% set in_presence = tracker_state in presence_names %}
-      {% set in_away = tracker_state in away_names %}
+      {% set in_presence = tracker in presence_names %}
+      {% set in_away = tracker in away_names %}
 
-      {% set prox = !input proximity_sensor %}
+      {% set prox = proximity_sensor %}
 
       {% if prox %}
         {% set distance = states(prox) | float(0) %}
-        {% set far = distance > (!input distance_threshold) %}
+        {% set far = distance > distance_threshold %}
       {% else %}
-        {% set far = tracker_state == 'not_home' %}
+        {% set far = tracker == 'not_home' %}
       {% endif %}
 
       {{ (in_presence and not in_away) and not far }}
