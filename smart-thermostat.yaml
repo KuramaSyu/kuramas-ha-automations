@@ -1,53 +1,37 @@
 blueprint:
-  name: Heizungssteuerung (Eco + Fenster + Kalender + Kill Switch)
+  name: Heizungssteuerung (Eco + Fenster + Kalender + Zonen-Logik + Kill Switch)
   description: >
-    🧠 INTELLIGENTE HEIZUNGSLOGIK FÜR HOME ASSISTANT
+    🧠 ERWEITERTE PRÄSENZLOGIK
 
-    Dieses Blueprint steuert ein Thermostat anhand mehrerer Prioritäten:
-
-    ─────────────────────────────
-    🔥 PRIORITÄTEN (wichtig)
-    ─────────────────────────────
-
-    1. 🪟 FENSTER OFFEN (binary_sensor = on)
-       → Heizung wird komplett ausgeschaltet (Sicherheits-Override)
-
-    2. 🔘 KILL SWITCH (input_boolean)
-       → deaktiviert die gesamte Automatik
-
-    3. 📅 KALENDER-OVERRIDE
-       → nur wenn ein aktiver Termin existiert UND das definierte Keyword
-         in Titel oder Beschreibung enthalten ist
-
-    4. 📍 ABWESENHEIT / ZONEN / DISTANZ
-       → setzt Eco-Temperatur
+    Dieses Blueprint steuert ein Thermostat mit klaren Prioritäten:
 
     ─────────────────────────────
-    📍 ZONEN (WICHTIG)
+    🔥 PRIORITÄTEN
     ─────────────────────────────
 
-    - Zonen sind Home Assistant zone entities (zone.home, zone.work, ...)
-    - Intern wird verglichen mit dem State des Trackers:
-        zone.work → "work"
-    - Wenn Tracker in einer dieser Zonen ist → wird als "anwesend" gewertet
+    1. 🪟 Fenster offen → Heizung AUS
+    2. 🔘 Kill Switch → alles blockiert
+    3. 📅 Kalender Override → blockiert Eco-Modus
+    4. 🔴 Away-Zonen → erzwingen Abwesenheit
+    5. 🟢 Presence-Zonen + Distanz → Anwesenheit
 
     ─────────────────────────────
-    📏 DISTANZ
+    🟢 PRESENCE ZONEN
     ─────────────────────────────
+    - Wenn Tracker in diesen Zonen ist → gilt als anwesend
 
-    - Distanz kommt NICHT aus der Person selbst
-    - Muss über einen separaten Sensor kommen (z. B. proximity.home)
-    - Wenn nicht gesetzt → fallback auf "not_home"
+    ─────────────────────────────
+    🔴 AWAY ZONEN
+    ─────────────────────────────
+    - Wenn Tracker in diesen Zonen ist → gilt sofort als abwesend
+    - Überschreibt Presence-Zonen
 
   domain: automation
 
   input:
 
     tracker:
-      name: Tracker (person oder device_tracker)
-      description: >
-        Basis für Standortlogik.
-        Liefert State wie: home / not_home / work / gym ...
+      name: Tracker (person / device_tracker)
       selector:
         entity:
           domain:
@@ -56,10 +40,6 @@ blueprint:
 
     proximity_sensor:
       name: Distanzsensor (optional)
-      description: >
-        Sensor für echte Distanzmessung zur Home-Zone.
-        Beispiel: proximity.home_distance.
-        Wenn nicht gesetzt → wird nur not_home verwendet.
       default: null
       selector:
         entity:
@@ -90,12 +70,20 @@ blueprint:
           max: 100
           step: 0.1
 
-    zones:
-      name: Zonen (optional)
+    presence_zones:
+      name: Anwesenheits-Zonen (optional)
       description: >
-        Liste von Zonen (zone.*).
-        Beispiel: zone.work, zone.gym.
-        Wenn Tracker in einer dieser Zonen ist → gilt als anwesend.
+        Zonen, in denen du als ANWESEND giltst (z. B. home, office).
+      default: []
+      selector:
+        entity:
+          domain: zone
+          multiple: true
+
+    away_zones:
+      name: Abwesenheits-Zonen (optional)
+      description: >
+        Zonen, die dich immer als ABWESEND markieren (override presence).
       default: []
       selector:
         entity:
@@ -104,8 +92,6 @@ blueprint:
 
     window_sensors:
       name: Fenster Sensoren
-      description: >
-        Wenn EIN Fenster offen ist (on) → Heizung wird komplett ausgeschaltet.
       selector:
         entity:
           domain: binary_sensor
@@ -113,8 +99,6 @@ blueprint:
 
     kill_switch:
       name: Kill Switch
-      description: >
-        input_boolean. Wenn ON → Automation ist deaktiviert.
       selector:
         entity:
           domain: input_boolean
@@ -127,10 +111,6 @@ blueprint:
 
     calendar_keyword:
       name: Kalender Keyword
-      description: >
-        Nur Termine, die dieses Keyword enthalten (Titel oder Beschreibung),
-        blockieren die Eco-Heizung.
-        Leer lassen = jeder aktive Termin blockiert.
       default: "automation"
       selector:
         text:
@@ -147,7 +127,7 @@ trigger:
 
 condition:
 
-  # 🪟 1. Fenster offen → sofort STOP
+  # 🪟 1. Fenster offen → STOP
   - condition: template
     value_template: >
       {% set windows = !input window_sensors %}
@@ -176,18 +156,26 @@ condition:
         {{ not (active and keyword in text) }}
       {% endif %}
 
-  # 📍 4. Abwesenheit / Zonen / Distanz
+  # 📍 4. Presence / Away / Distanz Logik
   - condition: template
     value_template: >
       {% set tracker_state = states(!input tracker) %}
 
-      {% set zone_entities = !input zones %}
-      {% set zone_names = zone_entities
+      {% set presence_zones = !input presence_zones %}
+      {% set away_zones = !input away_zones %}
+
+      {% set presence_names = presence_zones
           | map(attribute='entity_id')
           | map('replace','zone.','')
           | list %}
 
-      {% set in_zone = tracker_state in zone_names %}
+      {% set away_names = away_zones
+          | map(attribute='entity_id')
+          | map('replace','zone.','')
+          | list %}
+
+      {% set in_presence = tracker_state in presence_names %}
+      {% set in_away = tracker_state in away_names %}
 
       {% set prox = !input proximity_sensor %}
 
@@ -198,7 +186,7 @@ condition:
         {% set far = tracker_state == 'not_home' %}
       {% endif %}
 
-      {{ far or in_zone }}
+      {{ (in_presence and not in_away) and not far }}
 
 action:
   - service: climate.set_temperature
