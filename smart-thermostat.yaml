@@ -1,0 +1,156 @@
+blueprint:
+  name: Thermostat Eco + Fenster-Offen + Kalender Override
+  description: >
+    Steuerung des Thermostats mit Prioritäten:
+    1. Fenster offen → AUS
+    2. Kill-Switch → blockiert alles
+    3. Kalender-Override → blockiert Eco-Modus
+    4. Abwesenheit/Zonen → Eco-Temperatur
+
+  domain: automation
+
+  input:
+    tracker:
+      name: Tracker (Person oder Device)
+      selector:
+        entity:
+          domain:
+            - person
+            - device_tracker
+
+    thermostat:
+      name: Thermostat
+      selector:
+        entity:
+          domain: climate
+
+    eco_temperature:
+      name: Eco Temperatur
+      default: 17
+      selector:
+        number:
+          min: 5
+          max: 25
+          step: 0.5
+          unit_of_measurement: °C
+
+    distance_sensor:
+      name: Distanz Sensor (optional)
+      default: null
+      selector:
+        entity:
+          domain: sensor
+
+    distance_threshold:
+      name: Distanz Schwelle (km)
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 0.1
+
+    zones:
+      name: Zonen (optional)
+      default: []
+      selector:
+        entity:
+          domain: zone
+          multiple: true
+
+    window_sensors:
+      name: Fenster Sensoren
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+
+    kill_switch:
+      name: Kill Switch
+      selector:
+        entity:
+          domain: input_boolean
+
+    vacation_calendar:
+      name: Kalender
+      selector:
+        entity:
+          domain: calendar
+
+    calendar_keyword:
+      name: Kalender Keyword
+      default: "automation"
+      selector:
+        text:
+
+trigger:
+  - platform: state
+    entity_id: !input tracker
+
+  - platform: state
+    entity_id: !input vacation_calendar
+
+  - platform: state
+    entity_id: !input window_sensors
+
+condition:
+  # 1. Fenster OFFEN → sofort raus (Override ganz oben)
+  - condition: template
+    value_template: >
+      {% set windows = !input window_sensors %}
+      {{ not (windows | select('is_state','on') | list | count > 0) }}
+
+  # 2. Kill-Switch
+  - condition: state
+    entity_id: !input kill_switch
+    state: "off"
+
+  # 3. Kalender-Logik
+  - condition: template
+    value_template: >
+      {% set cal = !input vacation_calendar %}
+      {% set keyword = (!input calendar_keyword | lower).strip() %}
+      {% set active = is_state(cal, 'on') %}
+
+      {% set text = (
+        state_attr(cal, 'description') | default('') ~ ' ' ~
+        state_attr(cal, 'message') | default('')
+      ) | lower %}
+
+      {% if keyword == '' %}
+        {{ not active }}
+      {% else %}
+        {{ not (active and keyword in text) }}
+      {% endif %}
+
+  # 4. Abwesenheit / Zonen Logik
+  - condition: template
+    value_template: >
+      {% set tracker_state = states(!input tracker) %}
+
+      {% set zone_entities = !input zones %}
+      {% set zone_names = zone_entities
+          | map(attribute='entity_id')
+          | map('replace','zone.','')
+          | list %}
+
+      {% set in_zone = tracker_state in zone_names %}
+
+      {% set dist_sensor = !input distance_sensor %}
+      {% if dist_sensor %}
+        {% set distance = states(dist_sensor) | float(0) %}
+        {% set far = distance > (!input distance_threshold) %}
+      {% else %}
+        {% set far = tracker_state == 'not_home' %}
+      {% endif %}
+
+      {{ far or in_zone }}
+
+action:
+  - service: climate.set_temperature
+    target:
+      entity_id: !input thermostat
+    data:
+      temperature: !input eco_temperature
+
+mode: single
