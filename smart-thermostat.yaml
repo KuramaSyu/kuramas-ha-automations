@@ -1,22 +1,42 @@
 blueprint:
-  name: Thermostat Eco + Fenster-Offen + Kalender Override
+  name: Heizungssteuerung (Eco + Fenster + Kalender + Kill Switch)
   description: >
-    Steuerung des Thermostats mit Prioritäten:
-    1. Fenster offen → AUS
-    2. Kill-Switch → blockiert alles
-    3. Kalender-Override → blockiert Eco-Modus
-    4. Abwesenheit/Zonen → Eco-Temperatur
+    📌 INTELLIGENTE HEIZUNGSLOGIK
+
+    Dieses Blueprint steuert ein Thermostat basierend auf:
+    
+    PRIORITÄTEN (wichtig):
+    1. 🪟 Fenster offen → Heizung AUS (Sicherheits-Override)
+    2. 🔘 Kill-Switch → blockiert jede Automatik
+    3. 📅 Kalender-Override → blockiert Eco-Modus (nur bei Keyword)
+    4. 📍 Abwesenheit (Distanz ODER Zonen) → Eco-Temperatur
+
+    DISTANZ:
+    - Wird NICHT aus der Person berechnet
+    - Muss über einen separaten Sensor erfolgen (z. B. proximity)
 
   domain: automation
 
   input:
+
     tracker:
-      name: Tracker (Person oder Device)
+      name: Tracker (person oder device_tracker)
+      description: Basis für Zonenstatus (home / not_home / zone)
       selector:
         entity:
           domain:
             - person
             - device_tracker
+
+    proximity_sensor:
+      name: Distanzsensor (proximity / distance_to_home)
+      description: >
+        Optional. Wird verwendet für echte Distanzmessung zur Home-Zone.
+        Falls nicht gesetzt → fallback auf not_home Logik.
+      default: null
+      selector:
+        entity:
+          domain: sensor
 
     thermostat:
       name: Thermostat
@@ -33,13 +53,6 @@ blueprint:
           max: 25
           step: 0.5
           unit_of_measurement: °C
-
-    distance_sensor:
-      name: Distanz Sensor (optional)
-      default: null
-      selector:
-        entity:
-          domain: sensor
 
     distance_threshold:
       name: Distanz Schwelle (km)
@@ -60,6 +73,8 @@ blueprint:
 
     window_sensors:
       name: Fenster Sensoren
+      description: >
+        Wenn EIN Fenster offen ist → Heizung wird komplett ausgeschaltet.
       selector:
         entity:
           domain: binary_sensor
@@ -67,6 +82,8 @@ blueprint:
 
     kill_switch:
       name: Kill Switch
+      description: >
+        Wenn aktiviert → Automation ist komplett deaktiviert.
       selector:
         entity:
           domain: input_boolean
@@ -79,6 +96,10 @@ blueprint:
 
     calendar_keyword:
       name: Kalender Keyword
+      description: >
+        Nur Termine mit diesem Keyword (in Titel oder Beschreibung)
+        blockieren die Eco-Heizung.
+        Leer lassen = jeder aktive Termin blockiert.
       default: "automation"
       selector:
         text:
@@ -94,18 +115,19 @@ trigger:
     entity_id: !input window_sensors
 
 condition:
-  # 1. Fenster OFFEN → sofort raus (Override ganz oben)
+
+  # 🪟 1. Fenster OFFEN → sofort STOP (höchste Priorität)
   - condition: template
     value_template: >
       {% set windows = !input window_sensors %}
       {{ not (windows | select('is_state','on') | list | count > 0) }}
 
-  # 2. Kill-Switch
+  # 🔘 2. Kill Switch
   - condition: state
     entity_id: !input kill_switch
     state: "off"
 
-  # 3. Kalender-Logik
+  # 📅 3. Kalender-Override (nur wenn Keyword passt)
   - condition: template
     value_template: >
       {% set cal = !input vacation_calendar %}
@@ -123,7 +145,7 @@ condition:
         {{ not (active and keyword in text) }}
       {% endif %}
 
-  # 4. Abwesenheit / Zonen Logik
+  # 📍 4. Abwesenheit / Zonen / Distanz
   - condition: template
     value_template: >
       {% set tracker_state = states(!input tracker) %}
@@ -136,9 +158,10 @@ condition:
 
       {% set in_zone = tracker_state in zone_names %}
 
-      {% set dist_sensor = !input distance_sensor %}
-      {% if dist_sensor %}
-        {% set distance = states(dist_sensor) | float(0) %}
+      {% set prox = !input proximity_sensor %}
+
+      {% if prox %}
+        {% set distance = states(prox) | float(0) %}
         {% set far = distance > (!input distance_threshold) %}
       {% else %}
         {% set far = tracker_state == 'not_home' %}
