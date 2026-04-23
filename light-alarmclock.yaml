@@ -28,8 +28,9 @@ blueprint:
       name: Manual alarm time
       description: >
         Time to trigger alarm every day if timestamp sensor is not set.
+        Leave empty when using a timestamp sensor to avoid ambiguity.
         Settings at or shortly after midnight will not work as expected!
-      default: "7:00:00"
+      default: ""
       selector:
         time: {}
 
@@ -293,11 +294,13 @@ variables:
   start_wait_threshold: "{{ float(seconds) + float(pre_wait_seconds) }}"
 
   alarm_ts: >
-    {{ as_timestamp(
-        states(sensor) if sensor != 'none'
-        else states('sensor.date') ~ ' ' ~ manual_time
-      )
-    }}
+    {% if sensor != 'none' %}
+      {{ as_timestamp(states(sensor)) }}
+    {% elif manual_time %}
+      {{ as_timestamp(states('sensor.date') ~ ' ' ~ manual_time) }}
+    {% else %}
+      0
+    {% endif %}
 
 trigger:
   - platform: time_pattern
@@ -318,6 +321,9 @@ condition:
     value_template: >
       {{ last_run_entity == 'none' or
          as_timestamp(now()) - as_timestamp(states(last_run_entity), 0) > cooldown_duration * 3600 }}
+  - condition: template
+    value_template: >
+      {{ not (sensor != 'none' and manual_time != '') }}
 
 action:
   - wait_template: "{{ sensor == 'none' or as_timestamp(states(sensor), None) != None }}"
