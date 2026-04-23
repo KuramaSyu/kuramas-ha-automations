@@ -302,6 +302,51 @@ variables:
       0
     {% endif %}
 
+# JINJA MACROS (documentation)
+# The macros below are examples to improve readability of complex templates.
+# Important: Jinja macros are only available within the same template evaluation.
+# You can copy a macro block into any `value_template` / `wait_template` / variable
+# where you want to use it.
+#
+# Example macros:
+#
+# {% raw %}
+# {% macro sensor_available(entity) -%}
+#   {%- set s = states(entity) -%}
+#   {{ (entity == 'none') or (s not in [None, '', 'unknown', 'unavailable']) }}
+# {%- endmacro %}
+#
+# {% macro sensor_valid_ts(entity) -%}
+#   {{- sensor_available(entity) and (as_timestamp(states(entity)) is not none) and (as_timestamp(states(entity)) > 0) -}}
+# {%- endmacro %}
+#
+# {% macro time_in_window(start, end, now) -%}
+#   {%- if start is none and end is none -%}
+#     True
+#   {%- elif start is not none and end is none -%}
+#     {{ now >= start }}
+#   {%- elif start is none and end is not none -%}
+#     {{ now <= end }}
+#   {%- else -%}
+#     {%- if start < end -%}
+#       {{ (start <= now <= end) }}
+#     {%- else -%}
+#       {{ (now >= start) or (now <= end) }}
+#     {%- endif -%}
+#   {%- endif -%}
+# {%- endmacro %}
+#
+# Usage examples:
+# - In a condition's `value_template` you can paste the macro block, then call:
+#     {{ time_in_window(start_t, end_t, now_t) }}
+# - For sensor checks:
+#     {{ sensor_available(sensor) }}
+#     {{ sensor_valid_ts(sensor) }}
+#
+# Note: keep the macro definition and its use inside the same template field.
+# End of macros documentation
+# {% endraw %}
+
 trigger:
   - platform: time_pattern
     minutes: "*"
@@ -309,11 +354,23 @@ trigger:
 condition:
   - condition: template
     value_template: >
-      {{ (start_t is none and end_t is none) or
-         (start_t is not none and end_t is none and now_t >= start_t) or
-         (start_t is none and end_t is not none and now_t <= end_t) or
-         (start_t is not none and end_t is not none and
-           ((start_t <= now_t <= end_t) if start_t < end_t else (now_t >= start_t or now_t <= end_t))) }}
+      {% macro time_in_window(start, end, now) -%}
+        {%- if start is none and end is none -%}
+          True
+        {%- elif start is not none and end is none -%}
+          {{ now >= start }}
+        {%- elif start is none and end is not none -%}
+          {{ now <= end }}
+        {%- else -%}
+          {%- if start < end -%}
+            {{ (start <= now <= end) }}
+          {%- else -%}
+            {{ (now >= start) or (now <= end) }}
+          {%- endif -%}
+        {%- endif -%}
+      {%- endmacro %}
+
+      {{ time_in_window(start_t, end_t, now_t) }}
   - condition: template
     value_template: >
       {{ kill_switch_entity == 'none' or states(kill_switch_entity) != 'on' }}
@@ -326,22 +383,68 @@ condition:
       {{ not (sensor != 'none' and manual_time != '') }}
 
 action:
-  - wait_template: "{{ sensor == 'none' or as_timestamp(states(sensor), None) != None }}"
+  - wait_template: >
+      {% macro sensor_valid_ts(entity) -%}
+        {%- if entity == 'none' -%}
+          true
+        {%- else -%}
+          {%- set s = states(entity) -%}
+          {{ (s not in [None, '', 'unknown', 'unavailable']) and (as_timestamp(s, None) != None) }}
+        {%- endif -%}
+      {%- endmacro %}
+
+      {{ sensor_valid_ts(sensor) }}
 
   - wait_template: >
-      {{ 0 < (alarm_ts - as_timestamp(now())) <= float(start_wait_threshold)
-        and states(check_entity) in ['unknown', 'on', 'home'] }}
+      {% macro sensor_valid_ts(entity) -%}
+        {%- if entity == 'none' -%}
+          true
+        {%- else -%}
+          {%- set s = states(entity) -%}
+          {{ (s not in [None, '', 'unknown', 'unavailable']) and (as_timestamp(s, None) != None) }}
+        {%- endif -%}
+      {%- endmacro %}
+
+      {% macro alarm_within(threshold) -%}
+        {%- set diff = (alarm_ts | float) - as_timestamp(now()) -%}
+        {{ (diff > 0) and (diff <= (threshold | float)) }}
+      {%- endmacro %}
+
+      {{ sensor_valid_ts(sensor) and alarm_within(start_wait_threshold) and states(check_entity) in ['unknown', 'on', 'home'] }}
 
   - choose: []
     default: !input "pre_sunrise_actions"
 
   - condition: template
-    value_template: "{{ sensor == 'none' or as_timestamp(states(sensor), None) != None }}"
+    value_template: >
+      {% macro sensor_valid_ts(entity) -%}
+        {%- if entity == 'none' -%}
+          true
+        {%- else -%}
+          {%- set s = states(entity) -%}
+          {{ (s not in [None, '', 'unknown', 'unavailable']) and (as_timestamp(s, None) != None) }}
+        {%- endif -%}
+      {%- endmacro %}
+
+      {{ sensor_valid_ts(sensor) }}
 
   - condition: template
     value_template: >
-      {{ 0 < (alarm_ts - as_timestamp(now())) <= float(seconds)
-         and states(check_entity) in ['unknown', 'on', 'home'] }}
+      {% macro sensor_valid_ts(entity) -%}
+        {%- if entity == 'none' -%}
+          true
+        {%- else -%}
+          {%- set s = states(entity) -%}
+          {{ (s not in [None, '', 'unknown', 'unavailable']) and (as_timestamp(s, None) != None) }}
+        {%- endif -%}
+      {%- endmacro %}
+
+      {% macro alarm_within(threshold) -%}
+        {%- set diff = (alarm_ts | float) - as_timestamp(now()) -%}
+        {{ (diff > 0) and (diff <= (threshold | float)) }}
+      {%- endmacro %}
+
+      {{ sensor_valid_ts(sensor) and alarm_within(seconds) and states(check_entity) in ['unknown', 'on', 'home'] }}
 
   - choose:
       - conditions:
@@ -360,16 +463,48 @@ action:
 
   - repeat:
       while:
-        - "{{ sensor == 'none' or as_timestamp(states(sensor), None) != None }}"
-        - "{{ 0 < (alarm_ts - as_timestamp(now())) <= float(seconds) }}"
+        - >
+            {% macro sensor_valid_ts(entity) -%}
+              {%- if entity == 'none' -%}
+                true
+              {%- else -%}
+                {%- set s = states(entity) -%}
+                {{ (s not in [None, '', 'unknown', 'unavailable']) and (as_timestamp(s, None) != None) }}
+              {%- endif -%}
+            {%- endmacro %}
+
+            {{ sensor_valid_ts(sensor) }}
+        - >
+            {% macro alarm_within(threshold) -%}
+              {%- set diff = (alarm_ts | float) - as_timestamp(now()) -%}
+              {{ (diff > 0) and (diff <= (threshold | float)) }}
+            {%- endmacro %}
+
+            {{ alarm_within(seconds) }}
       sequence:
         - delay: "{{ tick_time }}"
 
         - choose:
             - conditions:
                 - "{{ 0 < (state_attr(light_entity, 'brightness') | int(0)) < (end_brightness | int) }}"
-                - "{{ sensor == 'none' or as_timestamp(states(sensor), None) != None }}"
-                - "{{ 0 < (alarm_ts - as_timestamp(now())) <= float(seconds) }}"
+                - >
+                    {% macro sensor_valid_ts(entity) -%}
+                      {%- if entity == 'none' -%}
+                        true
+                      {%- else -%}
+                        {%- set s = states(entity) -%}
+                        {{ (s not in [None, '', 'unknown', 'unavailable']) and (as_timestamp(s, None) != None) }}
+                      {%- endif -%}
+                    {%- endmacro %}
+
+                    {{ sensor_valid_ts(sensor) }}
+                - >
+                    {% macro alarm_within(threshold) -%}
+                      {%- set diff = (alarm_ts | float) - as_timestamp(now()) -%}
+                      {{ (diff > 0) and (diff <= (threshold | float)) }}
+                    {%- endmacro %}
+
+                    {{ alarm_within(seconds) }}
               sequence:
                 - choose:
                     - conditions:
