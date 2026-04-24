@@ -339,24 +339,6 @@ condition:
         {% endif %}
       {% endif %}
 action:
-  # Debug notification: sends the computed values used by the template to help troubleshoot mismatches.
-  - service: persistent_notification.create
-    data:
-      title: "Light alarmclock — debug values"
-      message: >
-        alarm_ts_raw: {{ states(sensor) }}
-        alarm_ts: {{ as_timestamp(states(sensor)) }}
-        now_timestamp: {{ as_timestamp(now()) }}
-        diff (alarm_ts - now): {{ (as_timestamp(states(sensor)) | float(0)) - as_timestamp(now()) }}
-        seconds (sunrise window): {{ seconds }}
-        sensor entity id: {{ sensor }}
-        sensor state: {{ states(sensor) }}
-        sensor_valid_ts: {{ (states(sensor) not in [None, '', 'unknown', 'unavailable']) and (as_timestamp(states(sensor)) != None) }}
-        alarm_within_seconds: {{ ((as_timestamp(states(sensor)) | float(0)) - as_timestamp(now())) > 0 and ((as_timestamp(states(sensor)) | float(0)) - as_timestamp(now())) <= (seconds | float) }}
-        check_entity: {{ check_entity }}
-        check_entity_state: {{ states(check_entity) }}
-        supports_color_temp: {{ supports_color_temp }}
-
   # pre-sunrise actions run only if above conditions passed (i.e. alarm is in timeframe)
   - choose: []
     default: !input "pre_sunrise_actions"
