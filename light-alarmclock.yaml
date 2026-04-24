@@ -327,36 +327,32 @@ condition:
   # the timestamp (or manual time) is valid, and the optional check_entity is in an acceptable state.
   - condition: template
     value_template: >
-      {% macro sensor_valid_ts(entity) -%}
-        {%- if entity == 'none' -%}
-          true
-        {%- else -%}
-          {%- set s = states(entity) -%}
-          {{ (s not in [None, '', 'unknown', 'unavailable']) and (as_timestamp(s, None) != None) }}
-        {%- endif -%}
-      {%- endmacro %}
-
-      {% macro alarm_within_threshold() -%}
-        {%- set threshold = (start_wait_threshold | default(seconds) | float) -%}
-        {%- set diff = (alarm_ts | float) - as_timestamp(now()) -%}
-        {{ (diff > 0) and (diff <= threshold) }}
-      {%- endmacro %}
-
-      {{ sensor_valid_ts(sensor) and alarm_within_threshold() and (check_entity == 'none' or states(check_entity) in ['unknown', 'on', 'home']) }}
+      {% if sensor == 'none' %}
+        false
+      {% else %}
+        {% set alarm_ts_val = as_timestamp(states(sensor)) %}
+        {% if alarm_ts_val == none %}
+          false
+        {% else %}
+          {% set diff = alarm_ts_val - as_timestamp(now()) %}
+          {{ (diff > 0) and (diff <= (seconds | float)) and (check_entity == 'none' or states(check_entity) in ['unknown','on','home']) }}
+        {% endif %}
+      {% endif %}
 action:
   # Debug notification: sends the computed values used by the template to help troubleshoot mismatches.
   - service: persistent_notification.create
     data:
       title: "Light alarmclock — debug values"
       message: >
-        alarm_ts: {{ alarm_ts }}
+        alarm_ts_raw: {{ states(sensor) }}
+        alarm_ts: {{ as_timestamp(states(sensor)) }}
         now_timestamp: {{ as_timestamp(now()) }}
-        diff (alarm_ts - now): {{ (alarm_ts | float) - as_timestamp(now()) }}
+        diff (alarm_ts - now): {{ (as_timestamp(states(sensor)) | float(0)) - as_timestamp(now()) }}
         seconds (sunrise window): {{ seconds }}
         sensor entity id: {{ sensor }}
         sensor state: {{ states(sensor) }}
-        sensor_valid_ts: {{ (sensor == 'none') or ((states(sensor) not in [None, '', 'unknown', 'unavailable']) and (as_timestamp(states(sensor), None) != None)) }}
-        alarm_within_seconds (diff > 0 and diff <= seconds): {{ ((alarm_ts | float) - as_timestamp(now())) > 0 and ((alarm_ts | float) - as_timestamp(now())) <= (seconds | float) }}
+        sensor_valid_ts: {{ (states(sensor) not in [None, '', 'unknown', 'unavailable']) and (as_timestamp(states(sensor)) != None) }}
+        alarm_within_seconds: {{ ((as_timestamp(states(sensor)) | float(0)) - as_timestamp(now())) > 0 and ((as_timestamp(states(sensor)) | float(0)) - as_timestamp(now())) <= (seconds | float) }}
         check_entity: {{ check_entity }}
         check_entity_state: {{ states(check_entity) }}
         supports_color_temp: {{ supports_color_temp }}
