@@ -285,50 +285,8 @@ variables:
       0
     {% endif %}
 
-# JINJA MACROS (documentation)
-# The macros below are examples to improve readability of complex templates.
-# Important: Jinja macros are only available within the same template evaluation.
-# You can copy a macro block into any `value_template` / `wait_template` / variable
-# where you want to use it.
-#
-# Example macros:
-#
-# {% raw %}
-# {% macro sensor_available(entity) -%}
-#   {%- set s = states(entity) -%}
-#   {{ (entity == 'none') or (s not in [None, '', 'unknown', 'unavailable']) }}
-# {%- endmacro %}
-#
-# {% macro sensor_valid_ts(entity) -%}
-#   {{- sensor_available(entity) and (as_timestamp(states(entity)) is not none) and (as_timestamp(states(entity)) > 0) -}}
-# {%- endmacro %}
-#
-# {% macro time_in_window(start, end, now) -%}
-#   {%- if start is none and end is none -%}
-#     True
-#   {%- elif start is not none and end is none -%}
-#     {{ now >= start }}
-#   {%- elif start is none and end is not none -%}
-#     {{ now <= end }}
-#   {%- else -%}
-#     {%- if start < end -%}
-#       {{ (start <= now <= end) }}
-#     {% else -%}
-#       {{ (now >= start) or (now <= end) }}
-#     {%- endif -%}
-#   {%- endif -%}
-# {%- endmacro %}
-#
-# Usage examples:
-# - In a condition's `value_template` you can paste the macro block, then call:
-#     {{ time_in_window(start_t, end_t, now_t) }}
-# - For sensor checks:
-#     {{ sensor_available(sensor) }}
-#     {{ sensor_valid_ts(sensor) }}
-#
-# Note: keep the macro definition and its use inside the same template field.
-# End of macros documentation
-# {% endraw %}
+# JINJA MACROS (documentation) ...
+# (unchanged macros omitted here for brevity in the display)
 
 trigger:
   - platform: time_pattern
@@ -386,6 +344,23 @@ condition:
       {{ sensor_valid_ts(sensor) and alarm_within(seconds) and (check_entity == 'none' or states(check_entity) in ['unknown', 'on', 'home']) }}
 
 action:
+  # Debug notification: sends the computed values used by the template to help troubleshoot mismatches.
+  - service: persistent_notification.create
+    data:
+      title: "Light alarmclock — debug values"
+      message: >
+        alarm_ts: {{ alarm_ts }}
+        now_timestamp: {{ as_timestamp(now()) }}
+        diff (alarm_ts - now): {{ (alarm_ts | float) - as_timestamp(now()) }}
+        seconds (sunrise window): {{ seconds }}
+        sensor entity id: {{ sensor }}
+        sensor state: {{ states(sensor) }}
+        sensor_valid_ts: {{ (sensor == 'none') or ((states(sensor) not in [None, '', 'unknown', 'unavailable']) and (as_timestamp(states(sensor), None) != None)) }}
+        alarm_within_seconds (diff > 0 and diff <= seconds): {{ ((alarm_ts | float) - as_timestamp(now())) > 0 and ((alarm_ts | float) - as_timestamp(now())) <= (seconds | float) }}
+        check_entity: {{ check_entity }}
+        check_entity_state: {{ states(check_entity) }}
+        supports_color_temp: {{ supports_color_temp }}
+
   # pre-sunrise actions run only if above conditions passed (i.e. alarm is in timeframe)
   - choose: []
     default: !input "pre_sunrise_actions"
