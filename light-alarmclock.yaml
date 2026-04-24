@@ -365,7 +365,7 @@ condition:
     value_template: >
       {{ not (sensor != 'none' and manual_time != '') }}
 
-  # New immediate check: only continue if alarm is within the configured sunrise_duration window,
+  # Immediate check: only continue if alarm is within the configured sunrise_duration window,
   # the timestamp (or manual time) is valid, and the optional check_entity is in an acceptable state.
   - condition: template
     value_template: >
@@ -390,9 +390,23 @@ action:
   - choose: []
     default: !input "pre_sunrise_actions"
 
-  # The initial light.turn_on before the loop has been removed per request.
-  # The repeat loop below will perform brightness/color updates during the timeframe.
+  # Re-added initial light.turn_on before the repeat loop — will set start brightness and color temperature (if supported).
+  - choose:
+      - conditions:
+          - "{{ supports_color_temp }}"
+        sequence:
+          - service: light.turn_on
+            data:
+              brightness: "{{ start_brightness | int }}"
+              color_temp_kelvin: "{{ start_kelvin_norm | int }}"
+            entity_id: !input "light_entity"
+    default:
+      - service: light.turn_on
+        data:
+          brightness: "{{ start_brightness | int }}"
+        entity_id: !input "light_entity"
 
+  # The repeat loop below performs the ramping behavior during the timeframe.
   - repeat:
       while:
         - >
