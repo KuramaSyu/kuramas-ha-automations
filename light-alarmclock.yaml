@@ -86,20 +86,6 @@ blueprint:
           unit_of_measurement: min
           mode: slider
 
-    pre_wait_buffer:
-      name: Pre-wait buffer (minutes)
-      description: >
-        Additional minutes before the sunrise duration when the automation may start waiting.
-        The automation will only start the main wait when the alarm is within (sunrise_duration + this buffer).
-      default: 10
-      selector:
-        number:
-          min: 0.0
-          max: 120.0
-          step: 1.0
-          unit_of_measurement: min
-          mode: slider
-
     start_brightness:
       name: Minimum brightness
       description: >
@@ -289,9 +275,6 @@ variables:
 
   color_temp_curve: !input "color_temp_curve"
   step_end_percent: !input "step_end_percent"
-  pre_wait_buffer: !input "pre_wait_buffer"
-  pre_wait_seconds: "{{ float(pre_wait_buffer) * 60 }}"
-  start_wait_threshold: "{{ float(seconds) + float(pre_wait_seconds) }}"
 
   alarm_ts: >
     {% if sensor != 'none' %}
@@ -330,7 +313,7 @@ variables:
 #   {%- else -%}
 #     {%- if start < end -%}
 #       {{ (start <= now <= end) }}
-#     {%- else -%}
+#     {% else -%}
 #       {{ (now >= start) or (now <= end) }}
 #     {%- endif -%}
 #   {%- endif -%}
@@ -382,39 +365,8 @@ condition:
     value_template: >
       {{ not (sensor != 'none' and manual_time != '') }}
 
-action:
-  - wait_template: >
-      {% macro sensor_valid_ts(entity) -%}
-        {%- if entity == 'none' -%}
-          true
-        {%- else -%}
-          {%- set s = states(entity) -%}
-          {{ (s not in [None, '', 'unknown', 'unavailable']) and (as_timestamp(s, None) != None) }}
-        {%- endif -%}
-      {%- endmacro %}
-
-      {{ sensor_valid_ts(sensor) }}
-
-  - wait_template: >
-      {% macro sensor_valid_ts(entity) -%}
-        {%- if entity == 'none' -%}
-          true
-        {%- else -%}
-          {%- set s = states(entity) -%}
-          {{ (s not in [None, '', 'unknown', 'unavailable']) and (as_timestamp(s, None) != None) }}
-        {%- endif -%}
-      {%- endmacro %}
-
-      {% macro alarm_within(threshold) -%}
-        {%- set diff = (alarm_ts | float) - as_timestamp(now()) -%}
-        {{ (diff > 0) and (diff <= (threshold | float)) }}
-      {%- endmacro %}
-
-      {{ sensor_valid_ts(sensor) and alarm_within(start_wait_threshold) and states(check_entity) in ['unknown', 'on', 'home'] }}
-
-  - choose: []
-    default: !input "pre_sunrise_actions"
-
+  # New immediate check: only continue if alarm is within the configured sunrise_duration window,
+  # the timestamp (or manual time) is valid, and the optional check_entity is in an acceptable state.
   - condition: template
     value_template: >
       {% macro sensor_valid_ts(entity) -%}
@@ -426,41 +378,20 @@ action:
         {%- endif -%}
       {%- endmacro %}
 
-      {{ sensor_valid_ts(sensor) }}
-
-  - wait_template: >
-      {% macro sensor_valid_ts(entity) -%}
-        {%- if entity == 'none' -%}
-          true
-        {%- else -%}
-          {%- set s = states(entity) -%}
-          {{ (s not in [None, '', 'unknown', 'unavailable']) and (as_timestamp(s, None) != None) }}
-        {%- endif -%}
-      {%- endmacro %}
-
       {% macro alarm_within(threshold) -%}
         {%- set diff = (alarm_ts | float) - as_timestamp(now()) -%}
         {{ (diff > 0) and (diff <= (threshold | float)) }}
       {%- endmacro %}
 
-      {{ sensor_valid_ts(sensor) and alarm_within(seconds) and states(check_entity) in ['unknown', 'on', 'home'] }}
-    timeout:
-      minutes: 60
-    continue_on_timeout: false
-  - choose:
-      - conditions:
-          - "{{ supports_color_temp }}"
-        sequence:
-          - service: light.turn_on
-            data:
-              brightness: "{{ start_brightness | int }}"
-              color_temp_kelvin: "{{ start_kelvin_norm | int }}"
-            entity_id: !input "light_entity"
-    default:
-      - service: light.turn_on
-        data:
-          brightness: "{{ start_brightness | int }}"
-        entity_id: !input "light_entity"
+      {{ sensor_valid_ts(sensor) and alarm_within(seconds) and (check_entity == 'none' or states(check_entity) in ['unknown', 'on', 'home']) }}
+
+action:
+  # pre-sunrise actions run only if above conditions passed (i.e. alarm is in timeframe)
+  - choose: []
+    default: !input "pre_sunrise_actions"
+
+  # The initial light.turn_on before the loop has been removed per request.
+  # The repeat loop below will perform brightness/color updates during the timeframe.
 
   - repeat:
       while:
