@@ -428,8 +428,7 @@ action:
 
       {{ sensor_valid_ts(sensor) }}
 
-  - condition: template
-    value_template: >
+  - wait_template: >
       {% macro sensor_valid_ts(entity) -%}
         {%- if entity == 'none' -%}
           true
@@ -445,7 +444,9 @@ action:
       {%- endmacro %}
 
       {{ sensor_valid_ts(sensor) and alarm_within(seconds) and states(check_entity) in ['unknown', 'on', 'home'] }}
-
+    timeout:
+      minutes: 60
+    continue_on_timeout: false
   - choose:
       - conditions:
           - "{{ supports_color_temp }}"
