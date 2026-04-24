@@ -336,13 +336,13 @@ condition:
         {%- endif -%}
       {%- endmacro %}
 
-      {% macro alarm_within(threshold) -%}
+      {% macro alarm_within_threshold() -%}
+        {%- set threshold = (start_wait_threshold | default(seconds) | float) -%}
         {%- set diff = (alarm_ts | float) - as_timestamp(now()) -%}
-        {{ (diff > 0) and (diff <= (threshold | float)) }}
+        {{ (diff > 0) and (diff <= threshold) }}
       {%- endmacro %}
 
-      {{ sensor_valid_ts(sensor) and alarm_within(seconds) and (check_entity == 'none' or states(check_entity) in ['unknown', 'on', 'home']) }}
-
+      {{ sensor_valid_ts(sensor) and alarm_within_threshold() and (check_entity == 'none' or states(check_entity) in ['unknown', 'on', 'home']) }}
 action:
   # Debug notification: sends the computed values used by the template to help troubleshoot mismatches.
   - service: persistent_notification.create
